@@ -4,10 +4,17 @@ const axios = require('axios');
 const fs = require('fs');
 const path = require('path')
 const https = require('https')
+const rateLimit = require('axios-rate-limit')
+
+
 
 const axiosInstance = axios.create({
   timeout: 999999,
   httpsAgent: new https.Agent({ keepAlive: false }),
+})
+
+const axiosLimit = rateLimit(axiosInstance, {
+  maxRequests: 60, perMilliseconds: 1000
 })
 
 const storage = new Storage({
@@ -51,27 +58,32 @@ async function uploadFileToGCS(filePath, destination) {
 http('getAllServices', async (req, res) => {
 
   const response = await axios.get('https://www.red.cl/restservice_v2/rest/getservicios/all');
-  const requests = chunkArray(response.data, 20)
-  requests.forEach(async requestPack => {
-    const requestsPack = requestPack.map(e => {
-      return axiosInstance.get(`https://www.red.cl/restservice_v2/rest/conocerecorrido?codsint=${e}`)
-    })
-    axios.all(requestsPack).then(responses => {
-      responses.forEach(async e => {
-        const recorrido = e.request.path.split("codsint=")[1];
-        await fs.writeFileSync(path.join('/tmp', `${recorrido}.json`), JSON.stringify(e.data, null, 2), (err) => {
-          if (err) {
-            console.error('Error guardando los datos del recorrido ' + recorrido + ' en el archivo JSON:', err);
-          } else {
-            console.log('Datos guardados en ' + recorrido + '.json');
-          }
+  const requests = chunkArray(response.data, 5)
+  console.log("requests: ", requests.length)
+  const data = [];
 
-        });
-        await uploadFileToGCS(path.join('/tmp', `${recorrido}.json`), recorrido + '.json')
-        await fs.rmSync(path.join('/tmp', `${recorrido}.json`))
-      });
-    })
-
+  const allRequest = requests.map(async (requestPack, i) => {
+    const endpoints = requestPack.map(e => axiosLimit.get(`https://www.red.cl/restservice_v2/rest/conocerecorrido?codsint=${e}`));
+    const responses = await Promise.all(endpoints)
+    responses.forEach(responseData => data.push(responseData.data))
+    console.log("data added: ", i)
   })
+
+  await Promise.all(allRequest)
+  await fs.writeFileSync(path.join('/tmp', 'compilado.json'), JSON.stringify(data))
+  await uploadFileToGCS(path.join('/tmp', 'compilado.json'), "compilado.json")
   res.send('ok')
 });
+
+
+
+// await Promise.all(
+//   requests.forEach(async requestPack => {
+//     const endpoints = requestPack.map(e => axiosLimit.get(`https://www.red.cl/restservice_v2/rest/conocerecorrido?codsint=${e}`))
+//     axios.all(endpoints).then((responses) => {
+//       responses.forEach(responseData => data.push(responseData.data))
+//     })
+//   })
+// ).then(async () => {
+//   await fs.writeFileSync(path.join('/tmp', 'compilado.json'), JSON.stringify(data))
+// })
