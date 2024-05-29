@@ -61,18 +61,22 @@ http('getAllServices', async (req, res) => {
   const requests = chunkArray(response.data, 5)
   console.log("requests: ", requests.length)
   const data = [];
+  try {
+    const allRequest = requests.map(async (requestPack, i) => {
+      const endpoints = requestPack.map(e => axiosLimit.get(`https://www.red.cl/restservice_v2/rest/conocerecorrido?codsint=${e}`));
+      const responses = await Promise.all(endpoints)
+      responses.forEach(responseData => data.push(responseData.data))
+      console.log("data added: ", i)
+    })
 
-  const allRequest = requests.map(async (requestPack, i) => {
-    const endpoints = requestPack.map(e => axiosLimit.get(`https://www.red.cl/restservice_v2/rest/conocerecorrido?codsint=${e}`));
-    const responses = await Promise.all(endpoints)
-    responses.forEach(responseData => data.push(responseData.data))
-    console.log("data added: ", i)
-  })
-
-  await Promise.all(allRequest)
-  await fs.writeFileSync(path.join('/tmp', 'compilado.json'), JSON.stringify(data))
-  await uploadFileToGCS(path.join('/tmp', 'compilado.json'), "compilado.json")
-  res.send('ok')
+    await Promise.all(allRequest)
+    await fs.writeFileSync(path.join('/tmp', 'compilado.json'), JSON.stringify(data))
+    await uploadFileToGCS(path.join('/tmp', 'compilado.json'), "compilado.json")
+    res.send('ok')
+  } catch (err) {
+    console.log(err)
+    res.sendStatus(400)
+  }
 });
 
 
